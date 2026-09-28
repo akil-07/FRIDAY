@@ -6,6 +6,7 @@ from fastapi.staticfiles import StaticFiles
 from dotenv import load_dotenv
 from groq import Groq
 from pymongo import MongoClient
+from duckduckgo_search import DDGS
 
 load_dotenv()
 GROQ_API_KEY = os.getenv('GROQ_API_KEY')
@@ -80,9 +81,32 @@ async def chat(background_tasks: BackgroundTasks, audio: UploadFile = File(...),
     # Select Model
     model_id = "openai/gpt-oss-120b" if brain == "genius" else "qwen/qwen3.8-27b"
 
+    # ORACLE MODULE: Live Internet Access
+    live_context = ""
+    try:
+        routing_prompt = f"""
+        Does this user's statement require looking up real-time, live internet information (like current weather, news, sports scores, recent events, or stock prices)?
+        User: "{user_text}"
+        If it DOES require live data, output exactly the best search query to find it. Do not output anything else.
+        If it DOES NOT require live data, output EXACTLY the word 'NO'.
+        """
+        router = groq_client.chat.completions.create(
+            model="qwen/qwen3.8-27b",
+            messages=[{"role": "user", "content": routing_prompt}],
+            temperature=0
+        )
+        search_query = router.choices[0].message.content.strip()
+        
+        if search_query != "NO" and "NO" not in search_query:
+            results = DDGS().text(search_query, max_results=3)
+            search_str = "\n".join([f"- {r['title']}: {r['body']}" for r in results])
+            live_context = f"\n\nLIVE INTERNET DATA RESULTS:\n{search_str}\n(Use this data to answer the user's question accurately)."
+    except Exception as e:
+        print("Oracle Error:", e)
+
     system_prompt = f"""You are Friday, my highly advanced and loyal AI assistant. I am your boss and creator. Address me as 'Boss' or 'Sir'. Be extremely sharp, highly competent, and obedient, similar to JARVIS from Iron Man. Speak in a crisp, professional, yet slightly witty tone. Keep your answers EXTREMELY short (1 sentence max). Do not use emojis. 
     
-    {core_profile}"""
+    {core_profile}{live_context}"""
 
     messages = [{"role": "system", "content": system_prompt}]
     
