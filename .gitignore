@@ -1,0 +1,6 @@
+.env
+__pycache__/
+*.mp4
+*.webm
+*.mp3
+*.log

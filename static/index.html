@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Friday Voice Assistant</title>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600&display=swap');
+        body {
+            margin: 0;
+            padding: 0;
+            background: radial-gradient(circle at center, #0a0a1a 0%, #000000 100%);
+            color: white;
+            font-family: 'Inter', sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            overflow: hidden;
+        }
+        .header {
+            position: absolute;
+            top: 40px;
+            text-align: center;
+        }
+        h1 {
+            font-weight: 300;
+            letter-spacing: 4px;
+            margin: 0;
+            background: linear-gradient(90deg, #00f2fe 0%, #4facfe 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        .status {
+            font-size: 14px;
+            color: #888;
+            margin-top: 10px;
+            text-transform: uppercase;
+            letter-spacing: 2px;
+        }
+        .orb-container {
+            position: relative;
+            width: 200px;
+            height: 200px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+        }
+        .orb {
+            width: 150px;
+            height: 150px;
+            border-radius: 50%;
+            background: radial-gradient(circle at 30% 30%, #00f2fe, #4facfe);
+            box-shadow: 0 0 40px rgba(0, 242, 254, 0.4), inset 0 0 20px rgba(255,255,255,0.5);
+            transition: all 0.3s ease;
+            position: relative;
+            z-index: 2;
+        }
+        .ring {
+            position: absolute;
+            width: 180px;
+            height: 180px;
+            border-radius: 50%;
+            border: 2px solid rgba(0, 242, 254, 0.2);
+            animation: pulse-ring 2s infinite ease-out;
+            z-index: 1;
+        }
+        
+        @keyframes pulse-ring {
+            0% { transform: scale(0.8); opacity: 1; }
+            100% { transform: scale(1.5); opacity: 0; }
+        }
+
+        .listening .orb {
+            box-shadow: 0 0 80px rgba(0, 242, 254, 0.8), inset 0 0 40px rgba(255,255,255,0.8);
+            transform: scale(1.05);
+        }
+        .listening .ring {
+            border-color: rgba(0, 242, 254, 0.8);
+            animation: pulse-ring 1s infinite ease-out;
+        }
+        .thinking .orb {
+            background: radial-gradient(circle at 30% 30%, #b224ef, #7579ff);
+            box-shadow: 0 0 60px rgba(178, 36, 239, 0.6);
+        }
+        .thinking .ring {
+            border-color: rgba(178, 36, 239, 0.4);
+            animation: pulse-ring 1.5s infinite ease-out;
+        }
+        .speaking .orb {
+            background: radial-gradient(circle at 30% 30%, #11998e, #38ef7d);
+            box-shadow: 0 0 60px rgba(56, 239, 125, 0.6);
+        }
+
+        .controls {
+            position: absolute;
+            bottom: 60px;
+            text-align: center;
+        }
+        button {
+            background: rgba(255,255,255,0.1);
+            border: 1px solid rgba(255,255,255,0.2);
+            color: white;
+            padding: 12px 30px;
+            border-radius: 30px;
+            font-family: 'Inter', sans-serif;
+            font-size: 16px;
+            cursor: pointer;
+            backdrop-filter: blur(10px);
+            transition: all 0.2s;
+        }
+        button:hover {
+            background: rgba(255,255,255,0.2);
+        }
+    </style>
+</head>
+<body>
+
+    <div class="header">
+        <h1>FRIDAY</h1>
+        <div class="status" id="status-text">Ready</div>
+    </div>
+
+    <div class="orb-container" id="orb-container">
+        <div class="ring"></div>
+        <div class="orb"></div>
+    </div>
+
+    <div class="controls">
+        <select id="brain-select" style="margin-bottom: 20px; padding: 10px 20px; border-radius: 30px; background: rgba(255,255,255,0.1); color: white; border: 1px solid rgba(255,255,255,0.2); font-size: 14px; cursor: pointer; outline: none; -webkit-appearance: none; text-align: center; backdrop-filter: blur(10px); display: block; width: 100%;">
+            <option value="fast" style="color: black;">⚡ Fast Brain (27B)</option>
+            <option value="genius" style="color: black;">🧠 Genius Brain (120B)</option>
+        </select>
+        <button id="talk-btn">Start Live Call</button>
+    </div>
+
+    <script>
+        const talkBtn = document.getElementById('talk-btn');
+        const statusText = document.getElementById('status-text');
+        const orbContainer = document.getElementById('orb-container');
+
+        const player = new Audio(); // Global player to bypass iOS Safari autoplay block
+        let mediaRecorder;
+        let audioChunks = [];
+        let isListening = false;
+        let audioContext;
+        let analyser;
+        let microphone;
+        let silenceTimer;
+        let stream;
+
+        async function initAudio() {
+            try {
+                stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                mediaRecorder = new MediaRecorder(stream);
+                
+                audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                analyser = audioContext.createAnalyser();
+                microphone = audioContext.createMediaStreamSource(stream);
+                microphone.connect(analyser);
+                
+                analyser.fftSize = 512;
+                const bufferLength = analyser.frequencyBinCount;
+                const dataArray = new Uint8Array(bufferLength);
+
+                mediaRecorder.ondataavailable = (event) => {
+                    audioChunks.push(event.data);
+                };
+
+                mediaRecorder.onstop = async () => {
+                    if (audioChunks.length === 0) return;
+                    
+                    const mimeType = mediaRecorder.mimeType;
+                    const extension = mimeType.includes('mp4') ? 'mp4' : 'webm';
+                    const audioBlob = new Blob(audioChunks, { type: mimeType });
+                    audioChunks = [];
+                    
+                    setStatus('thinking');
+                    
+                    const formData = new FormData();
+                    formData.append('audio', audioBlob, `user.${extension}`);
+                    formData.append('brain', document.getElementById('brain-select').value);
+                    
+                    try {
+                        const response = await fetch('/chat', {
+                            method: 'POST',
+                            body: formData
+                        });
+                        
+                        if (response.ok) {
+                            const blob = await response.blob();
+                            const audioUrl = URL.createObjectURL(blob);
+                            player.src = audioUrl;
+                            
+                            setStatus('speaking');
+                            player.play();
+                            
+                            player.onended = () => {
+                                startListening(); // Auto-resume listening
+                            };
+                        } else {
+                            setStatus('ready');
+                        }
+                    } catch (e) {
+                        console.error(e);
+                        setStatus('ready');
+                    }
+                };
+
+                function checkSilence() {
+                    if (!isListening) return;
+                    
+                    analyser.getByteFrequencyData(dataArray);
+                    let sum = 0;
+                    for(let i = 0; i < bufferLength; i++) {
+                        sum += dataArray[i];
+                    }
+                    let average = sum / bufferLength;
+                    
+                    if (average > 25) { 
+                        clearTimeout(silenceTimer);
+                        silenceTimer = setTimeout(() => {
+                            if (isListening) stopListening();
+                        }, 600); // Ultra-aggressive 0.6 second silence detection!
+                    }
+                    
+                    requestAnimationFrame(checkSilence);
+                }
+
+                window.startListening = () => {
+                    if (audioContext.state === 'suspended') audioContext.resume();
+                    audioChunks = [];
+                    mediaRecorder.start();
+                    isListening = true;
+                    setStatus('listening');
+                    checkSilence();
+                };
+
+                window.stopListening = () => {
+                    if (mediaRecorder.state === 'recording') {
+                        mediaRecorder.stop();
+                    }
+                    isListening = false;
+                };
+
+            } catch (err) {
+                alert('Microphone access denied!');
+            }
+        }
+
+        function setStatus(state) {
+            orbContainer.className = 'orb-container';
+            if (state === 'listening') {
+                orbContainer.classList.add('listening');
+                statusText.innerText = 'Listening...';
+                talkBtn.innerText = 'End Call';
+            } else if (state === 'thinking') {
+                orbContainer.classList.add('thinking');
+                statusText.innerText = 'Processing...';
+            } else if (state === 'speaking') {
+                orbContainer.classList.add('speaking');
+                statusText.innerText = 'Speaking...';
+            } else {
+                statusText.innerText = 'Ready';
+                talkBtn.innerText = 'Start Live Call';
+            }
+        }
+
+        talkBtn.addEventListener('click', async () => {
+            // Unlock audio engine for iOS Safari
+            player.play().catch(e => {});
+            
+            if (!stream) {
+                await initAudio();
+                startListening();
+            } else {
+                if (isListening) {
+                    stopListening();
+                    setStatus('ready');
+                    stream.getTracks().forEach(track => track.stop());
+                    stream = null;
+                } else {
+                    await initAudio();
+                    startListening();
+                }
+            }
+        });
+    </script>
+</body>
+</html>
