@@ -219,11 +219,11 @@
                     }
                     let average = sum / bufferLength;
                     
-                    if (average > 25) { 
+                    if (average > 10) { 
                         clearTimeout(silenceTimer);
                         silenceTimer = setTimeout(() => {
                             if (isListening) stopListening();
-                        }, 600); // Ultra-aggressive 0.6 second silence detection!
+                        }, 1500); // 1.5 second silence detection
                     }
                     
                     requestAnimationFrame(checkSilence);
