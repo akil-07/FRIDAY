@@ -1,5 +1,6 @@
 import os
 import aiohttp
+import asyncio
 from fastapi import FastAPI, UploadFile, File, Form, BackgroundTasks
 from fastapi.responses import Response, HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -98,9 +99,15 @@ async def chat(background_tasks: BackgroundTasks, audio: UploadFile = File(...),
         search_query = router.choices[0].message.content.strip()
         
         if search_query != "NO" and "NO" not in search_query:
-            results = DDGS().text(search_query, max_results=3)
-            search_str = "\n".join([f"- {r['title']}: {r['body']}" for r in results])
-            live_context = f"\n\nLIVE INTERNET DATA RESULTS:\n{search_str}\n(Use this data to answer the user's question accurately)."
+            def do_search():
+                return list(DDGS().text(search_query, max_results=3))
+            
+            try:
+                results = await asyncio.wait_for(asyncio.to_thread(do_search), timeout=3.0)
+                search_str = "\n".join([f"- {r['title']}: {r['body']}" for r in results])
+                live_context = f"\n\nLIVE INTERNET DATA RESULTS:\n{search_str}\n(Use this data to answer the user's question accurately)."
+            except asyncio.TimeoutError:
+                print("Oracle Error: DuckDuckGo search timed out after 3 seconds.")
     except Exception as e:
         print("Oracle Error:", e)
 
