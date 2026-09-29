@@ -142,6 +142,11 @@
         const orbContainer = document.getElementById('orb-container');
 
         const player = new Audio(); // Global player to bypass iOS Safari autoplay block
+        
+        let playAudioContext;
+        let gainNode;
+        let mediaSource;
+
         let mediaRecorder;
         let audioChunks = [];
         let isListening = false;
@@ -191,6 +196,15 @@
                         
                         if (response.ok) {
                             const blob = await response.blob();
+                            
+                            // If backend returned empty audio, it means Whisper didn't hear anything.
+                            if (blob.size === 0) {
+                                orbContainer.className = 'orb-container';
+                                statusText.innerText = "Didn't catch that...";
+                                setTimeout(() => { startListening(); }, 1500);
+                                return;
+                            }
+
                             const audioUrl = URL.createObjectURL(blob);
                             player.src = audioUrl;
                             
@@ -201,7 +215,9 @@
                                 startListening(); // Auto-resume listening
                             };
                         } else {
-                            setStatus('ready');
+                            orbContainer.className = 'orb-container';
+                            statusText.innerText = 'API Error! Try again.';
+                            setTimeout(() => { setStatus('ready'); }, 2000);
                         }
                     } catch (e) {
                         console.error(e);
@@ -272,6 +288,17 @@
             // Unlock audio engine for iOS Safari
             player.play().catch(e => {});
             
+            // Initialize volume booster on first click
+            if (!playAudioContext) {
+                playAudioContext = new (window.AudioContext || window.webkitAudioContext)();
+                mediaSource = playAudioContext.createMediaElementSource(player);
+                gainNode = playAudioContext.createGain();
+                gainNode.gain.value = 3.0; // Boost volume by 300%
+                mediaSource.connect(gainNode);
+                gainNode.connect(playAudioContext.destination);
+            }
+            if (playAudioContext.state === 'suspended') playAudioContext.resume();
+
             if (!stream) {
                 await initAudio();
                 startListening();
