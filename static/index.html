@@ -154,6 +154,7 @@
         let analyser;
         let microphone;
         let silenceTimer;
+        let maxRecordTimer;
         let stream;
 
         async function initAudio() {
@@ -235,7 +236,7 @@
                     }
                     let average = sum / bufferLength;
                     
-                    if (average > 10) { 
+                    if (average > 15) { 
                         clearTimeout(silenceTimer);
                         silenceTimer = setTimeout(() => {
                             if (isListening) stopListening();
@@ -252,9 +253,15 @@
                     isListening = true;
                     setStatus('listening');
                     checkSilence();
+                    
+                    // Force stop after 8 seconds max to prevent getting stuck
+                    maxRecordTimer = setTimeout(() => {
+                        if (isListening) stopListening();
+                    }, 8000);
                 };
 
                 window.stopListening = () => {
+                    clearTimeout(maxRecordTimer);
                     if (mediaRecorder.state === 'recording') {
                         mediaRecorder.stop();
                     }
@@ -283,6 +290,13 @@
                 talkBtn.innerText = 'Start Live Call';
             }
         }
+        
+        // Tap the orb to manually force it to process immediately
+        orbContainer.addEventListener('click', () => {
+            if (isListening) {
+                stopListening();
+            }
+        });
 
         talkBtn.addEventListener('click', async () => {
             // Unlock audio engine for iOS Safari
