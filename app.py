@@ -7,12 +7,12 @@ from fastapi.staticfiles import StaticFiles
 from dotenv import load_dotenv
 from groq import Groq
 from pymongo import MongoClient
-from duckduckgo_search import DDGS
 
 load_dotenv()
 GROQ_API_KEY = os.getenv('GROQ_API_KEY')
 DEEPGRAM_API_KEY = os.getenv('DEEPGRAM_API_KEY')
 MONGO_URI = os.getenv('MONGO_URI')
+TAVILY_API_KEY = os.getenv('TAVILY_API_KEY')
 
 groq_client = Groq(api_key=GROQ_API_KEY)
 app = FastAPI()
@@ -99,20 +99,32 @@ async def chat(background_tasks: BackgroundTasks, audio: UploadFile = File(...),
         search_query = router.choices[0].message.content.strip()
         
         if search_query != "NO" and "NO" not in search_query:
-            def do_search():
-                return list(DDGS().text(search_query, backend="lite", max_results=3))
-            
-            try:
-                results = await asyncio.wait_for(asyncio.to_thread(do_search), timeout=4.0)
-                if not results:
-                    live_context = "\n\n(Note to Friday: You tried to search the internet for the user's request, but your search engine returned 0 results because Render's cloud servers are blocking the connection. Tell the Boss your internet access is currently blocked by the cloud provider.)"
-                else:
-                    search_str = "\n".join([f"- {r['title']}: {r['body']}" for r in results])
-                    live_context = f"\n\nLIVE INTERNET DATA RESULTS:\n{search_str}\n(Use this data to answer the user's question accurately)."
-            except asyncio.TimeoutError:
-                live_context = "\n\n(Note to Friday: You tried to search the internet, but the connection timed out. Tell the boss your internet connection is too slow right now.)"
-            except Exception as e:
-                live_context = "\n\n(Note to Friday: Your internet search engine crashed. Tell the boss your search module is offline.)"
+            if not TAVILY_API_KEY:
+                live_context = "\n\n(Note to Friday: You cannot search the internet right now because your TAVILY_API_KEY is missing from the environment.)"
+            else:
+                try:
+                    tavily_url = "https://api.tavily.com/search"
+                    payload = {
+                        "api_key": TAVILY_API_KEY,
+                        "query": search_query,
+                        "max_results": 3
+                    }
+                    async with aiohttp.ClientSession() as session:
+                        async with session.post(tavily_url, json=payload, timeout=5.0) as resp:
+                            if resp.status == 200:
+                                data = await resp.json()
+                                results = data.get("results", [])
+                                if not results:
+                                    live_context = "\n\n(Note to Friday: You searched the internet, but found 0 results.)"
+                                else:
+                                    search_str = "\n".join([f"- {r['title']}: {r['content']}" for r in results])
+                                    live_context = f"\n\nLIVE INTERNET DATA RESULTS:\n{search_str}\n(Use this data to answer the user's question accurately)."
+                            else:
+                                live_context = "\n\n(Note to Friday: Your internet search engine crashed. Tell the boss your search module is offline.)"
+                except asyncio.TimeoutError:
+                    live_context = "\n\n(Note to Friday: You tried to search the internet, but the connection timed out. Tell the boss your internet connection is too slow right now.)"
+                except Exception as e:
+                    live_context = "\n\n(Note to Friday: Your internet search engine crashed. Tell the boss your search module is offline.)"
     except Exception as e:
         print("Oracle Error:", e)
 
