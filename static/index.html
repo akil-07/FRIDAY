@@ -176,14 +176,15 @@
                 };
 
                 mediaRecorder.onstop = async () => {
-                    if (audioChunks.length === 0) return;
+                    if (audioChunks.length === 0) {
+                        setStatus('ready');
+                        return;
+                    }
                     
                     const mimeType = mediaRecorder.mimeType;
                     const extension = mimeType.includes('mp4') ? 'mp4' : 'webm';
                     const audioBlob = new Blob(audioChunks, { type: mimeType });
                     audioChunks = [];
-                    
-                    setStatus('thinking');
                     
                     const formData = new FormData();
                     formData.append('audio', audioBlob, `user.${extension}`);
@@ -249,7 +250,7 @@
                 window.startListening = () => {
                     if (audioContext.state === 'suspended') audioContext.resume();
                     audioChunks = [];
-                    mediaRecorder.start();
+                    mediaRecorder.start(250); // Force data chunks every 250ms
                     isListening = true;
                     setStatus('listening');
                     checkSilence();
@@ -264,6 +265,7 @@
                     clearTimeout(maxRecordTimer);
                     if (mediaRecorder.state === 'recording') {
                         mediaRecorder.stop();
+                        setStatus('thinking'); // Immediate visual feedback
                     }
                     isListening = false;
                 };
