@@ -5,7 +5,7 @@ from fastapi import FastAPI, UploadFile, File, Form, BackgroundTasks
 from fastapi.responses import Response, HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from dotenv import load_dotenv
-from groq import Groq
+from groq import AsyncGroq
 from pymongo import MongoClient
 
 load_dotenv()
@@ -14,7 +14,7 @@ DEEPGRAM_API_KEY = os.getenv('DEEPGRAM_API_KEY')
 MONGO_URI = os.getenv('MONGO_URI')
 TAVILY_API_KEY = os.getenv('TAVILY_API_KEY')
 
-groq_client = Groq(api_key=GROQ_API_KEY)
+groq_client = AsyncGroq(api_key=GROQ_API_KEY)
 app = FastAPI()
 
 app.mount("/static", StaticFiles(directory="static"), name="static")
@@ -22,18 +22,22 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 # Connect to MongoDB (Long-Term Memory)
 db_client = None
 collection = None
+core_profile_cache = []
+
 if MONGO_URI:
     try:
         db_client = MongoClient(MONGO_URI)
         db = db_client["friday_db"]
         collection = db["core_profile"]
+        for doc in collection.find():
+            core_profile_cache.append(doc["fact"])
     except Exception as e:
         print("Failed to connect to MongoDB:", e)
 
 # Short-Term Memory (Rolling Window)
 short_term_memory = []
 
-def extract_memory_background(user_text: str, ai_response: str):
+async def extract_memory_background(user_text: str, ai_response: str):
     if collection is None: return
     extract_prompt = f"""
     Analyze this interaction between the user and Friday. 
@@ -43,13 +47,15 @@ def extract_memory_background(user_text: str, ai_response: str):
     If none exist, output EXACTLY 'NONE'. If facts exist, output a short bulleted list.
     """
     try:
-        completion = groq_client.chat.completions.create(
+        completion = await groq_client.chat.completions.create(
             model="qwen/qwen3.8-27b",
             messages=[{"role": "user", "content": extract_prompt}]
         )
         facts = completion.choices[0].message.content.strip()
         if facts != "NONE" and facts != "":
-            collection.insert_one({"fact": facts})
+            # Run the synchronous DB insert in a thread so it doesn't block
+            await asyncio.to_thread(collection.insert_one, {"fact": facts})
+            core_profile_cache.append(facts)
     except Exception as e:
         print("Memory extraction error:", e)
 
@@ -63,7 +69,7 @@ async def chat(background_tasks: BackgroundTasks, audio: UploadFile = File(...),
     audio_data = await audio.read()
         
     # EARS (No disk I/O, direct memory transfer)
-    transcription = groq_client.audio.transcriptions.create(
+    transcription = await groq_client.audio.transcriptions.create(
         file=(audio.filename, audio_data),
         model="whisper-large-v3",
     )
@@ -71,13 +77,10 @@ async def chat(background_tasks: BackgroundTasks, audio: UploadFile = File(...),
     if not user_text.strip():
         return Response(status_code=400, content="No speech detected")
         
-    # Fetch Core Profile from DB
+    # Fetch Core Profile from Cache (Instantly!)
     core_profile = ""
-    if collection is not None:
-        docs = collection.find()
-        facts_list = [doc["fact"] for doc in docs]
-        if facts_list:
-            core_profile = "Facts about the Boss:\n" + "\n".join(facts_list)
+    if core_profile_cache:
+        core_profile = "Facts about the Boss:\n" + "\n".join(core_profile_cache)
 
     # Select Model
     model_id = "openai/gpt-oss-120b" if brain == "genius" else "qwen/qwen3.8-27b"
@@ -91,7 +94,7 @@ async def chat(background_tasks: BackgroundTasks, audio: UploadFile = File(...),
         If it DOES require live data, output exactly the best search query to find it. Do not output anything else.
         If it DOES NOT require live data, output EXACTLY the word 'NO'.
         """
-        router = groq_client.chat.completions.create(
+        router = await groq_client.chat.completions.create(
             model="qwen/qwen3.8-27b",
             messages=[{"role": "user", "content": routing_prompt}],
             temperature=0
@@ -142,7 +145,7 @@ async def chat(background_tasks: BackgroundTasks, audio: UploadFile = File(...),
     messages.append({"role": "user", "content": user_text})
 
     # BRAIN
-    completion = groq_client.chat.completions.create(
+    completion = await groq_client.chat.completions.create(
         model=model_id,
         messages=messages
     )
