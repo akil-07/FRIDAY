@@ -69,9 +69,12 @@ async def chat(background_tasks: BackgroundTasks, audio: UploadFile = File(...),
     audio_data = await audio.read()
         
     # EARS (No disk I/O, direct memory transfer)
+    # We pass the memory cache to Whisper as a hint so it knows how to spell your name (Akil)!
+    whisper_prompt = "The user is talking to Friday. " + " ".join(core_profile_cache)
     transcription = await groq_client.audio.transcriptions.create(
         file=(audio.filename, audio_data),
         model="whisper-large-v3",
+        prompt=whisper_prompt
     )
     user_text = transcription.text
     if not user_text.strip():
@@ -131,7 +134,7 @@ async def chat(background_tasks: BackgroundTasks, audio: UploadFile = File(...),
     except Exception as e:
         print("Oracle Error:", e)
 
-    system_prompt = f"""You are Friday, my highly advanced and loyal AI assistant. I am your boss and creator. Address me as 'Boss' or 'Sir'. Be extremely sharp, highly competent, and obedient, similar to JARVIS from Iron Man. Speak in a crisp, professional, yet slightly witty tone. Keep your answers EXTREMELY short (1 sentence max). Do not use emojis. 
+    system_prompt = f"""You are Friday, my highly advanced and loyal AI assistant. I am your boss and creator. Address me as 'Boss' or 'Sir'. Be extremely sharp, highly competent, and obedient, similar to JARVIS from Iron Man. Speak in a crisp, professional, yet slightly witty tone. Keep your answers concise and conversational (1 to 2 short sentences). Do not use emojis. 
     
     {core_profile}{live_context}"""
 
@@ -158,8 +161,8 @@ async def chat(background_tasks: BackgroundTasks, audio: UploadFile = File(...),
     # Trigger Background Task for Long-Term Memory Extraction
     background_tasks.add_task(extract_memory_background, user_text, ai_response)
 
-    # MOUTH
-    url = "https://api.deepgram.com/v1/speak?model=aura-asteria-en"
+    # MOUTH (Changed voice model to Hera for a calmer, more measured pace)
+    url = "https://api.deepgram.com/v1/speak?model=aura-hera-en"
     headers = {
         "Authorization": f"Token {DEEPGRAM_API_KEY}",
         "Content-Type": "application/json"
